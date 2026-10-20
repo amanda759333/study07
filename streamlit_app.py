@@ -8,6 +8,7 @@
 import streamlit as st
 
 from teamform import db, service
+from teamform.board import MAX_MEMBERS, Board, Team, load_board
 from teamform.config import get_secret, secret_status
 from teamform.roster import RosterError
 
@@ -84,9 +85,66 @@ def header(user: service.User) -> None:
     show_result()
 
 
+def apply_block_reason(board: Board, user: service.User) -> str | None:
+    """[공고 2.8] 이미 팀에 속했거나, 결과를 기다리는 지원이 있거나, 모집이 마감되었으면 지원 단추를 비활성화한다.
+
+    그 밖에 막히는 지원(팀이 꽉 참, 같은 주 역할 등)은 단추를 누른 뒤 "막힘" 안내로 막는다(공고 2.7).
+    """
+    if board.closed:
+        return "모집이 마감됨"
+    if board.team_of(user.id):
+        return "이미 팀이 있음"
+    if board.pending_of(user.id):
+        return "결과를 기다리는 지원이 있음"
+    return None
+
+
+def on_apply(user: service.User, team_no: int) -> None:
+    set_result("막힘: 지원 기능은 다음 작업(#9)에서 만듦")
+
+
+def team_card(team: Team, me: service.User | None = None, block: str | None = None) -> None:
+    """[공고 2.7] 팀 하나의 표시. key는 team_1, team_2, … 이고 팀원의 이름이 보인다.
+
+    me가 있으면 학생 화면이다: 지원 단추(apply_1, …)를 둔다.
+    """
+    with st.container(key=f"team_{team.no}", border=True):
+        mine = me is not None and team.has_member(me.id)
+        st.markdown(f"**{team.name}** ({len(team.members)}/{MAX_MEMBERS})" + (" · **내 팀**" if mine else ""))
+        if team.members:
+            st.markdown("\n".join(f"- {m.name} ({m.student_no}) — {m.roles_text()}" for m in team.members))
+        else:
+            st.caption("아직 팀원이 없음")
+        if me is not None:
+            st.button(
+                f"{team.name}에 지원",
+                key=f"apply_{team.no}",
+                disabled=block is not None,
+                help=block,
+                on_click=on_apply,
+                args=(me, team.no),
+            )
+
+
 def student_screen(user: service.User) -> None:
+    with db.connection() as conn:
+        board = load_board(conn)
+
+    mine = board.team_of(user.id)
+    # [공고 2.8] 로그인한 학생의 팀을 구별되게 표시하고, 팀이 없으면 "아직 팀이 없음"
+    st.markdown(f"내 팀: **{mine.name}**" if mine else "아직 팀이 없음")
+    waiting = board.pending_of(user.id)
+    if waiting:
+        team = board.team_by_id(waiting.team_id)
+        yes = sum(1 for v in waiting.votes.values() if v == "찬성")
+        st.caption(f"결과를 기다리는 지원: {team.name} (팀원 {len(team.members)}명 가운데 {yes}명 찬성)")
+    if board.closed:
+        st.caption("모집이 마감되었습니다.")
+
     st.subheader("팀 목록")
-    st.caption("팀 목록과 지원은 다음 작업(#8, #9)에서 만든다.")
+    block = apply_block_reason(board, user)
+    for team in board.teams:
+        team_card(team, me=user, block=block)
 
 
 def on_admin_start(user: service.User) -> None:
@@ -121,9 +179,12 @@ def admin_screen(user: service.User) -> None:
 
     with db.connection() as conn:
         students = conn.execute("select count(*) as n from tf_students where not is_admin").fetchone()["n"]
-        teams = conn.execute("select count(*) as n from tf_teams").fetchone()["n"]
-        closed = service.is_closed(conn)
-    st.caption(f"지금 상태: 학생 {students}명, 팀 {teams}개, {'마감됨' if closed else '모집 중'}")
+        board = load_board(conn)
+    st.caption(f"지금 상태: 학생 {students}명, 팀 {len(board.teams)}개, {'마감됨' if board.closed else '모집 중'}")
+
+    st.subheader("팀 현황")
+    for team in board.teams:
+        team_card(team)
 
 
 def main() -> None:
