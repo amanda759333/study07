@@ -9,11 +9,10 @@ import csv
 import io
 from dataclasses import dataclass
 
-from teamform.service import ADMIN_NO
-
 # [공고 2.2] 역할은 6개
 ROLES = ("기획자", "웹 프로그래머", "프론트엔드 디자이너", "테스터", "보고서 작성자", "발표자")
 COLUMNS = ["student_no", "name", "main_role", "sub_roles"]
+ADMIN_NO = "admin"  # [공고 2.1] 관리자 학번. 명단에는 쓸 수 없다
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,7 @@ import streamlit as st
 
 from teamform import db, service
 from teamform.config import get_secret, secret_status
+from teamform.roster import RosterError
 
 st.set_page_config(page_title="팀 편성", page_icon="👥")
 
@@ -79,10 +80,41 @@ def student_screen(user: service.User) -> None:
     st.caption("팀 목록과 지원은 다음 작업(#8, #9)에서 만든다.")
 
 
+def on_admin_start(user: service.User) -> None:
+    """명단으로 처음 상태 만들기 단추. 화면을 다시 그리기 전에 실행되어 result에 바로 보인다."""
+    uploaded = st.session_state.get("admin_roster_file")
+    if uploaded is None:
+        set_result("막힘: 명단 CSV 파일을 올리지 않음")
+        return
+    try:
+        with db.connection() as conn:
+            message = service.reset_roster(conn, user, uploaded.getvalue(), int(st.session_state["admin_team_count"]))
+    except RosterError as exc:
+        more = f" 외 {len(exc.errors) - 1}건" if len(exc.errors) > 1 else ""
+        set_result(f"막힘: {exc.errors[0]}{more}")
+    except PermissionError:
+        set_result("막힘: 관리자만 쓸 수 있음")
+    except ValueError as exc:
+        set_result(f"막힘: {exc}")
+    except Exception as exc:
+        set_result(f"막힘: {db.safe_error(exc)}")
+    else:
+        set_result(message)
+
+
 def admin_screen(user: service.User) -> None:
     service.require_admin(user)  # 학생 계정이면 여기서 멈춘다(공고 6.3-11)
-    st.subheader("관리자")
-    st.caption("명단 올리기는 다음 작업(#7)에서 만든다.")
+    st.subheader("명단 올리기")
+    st.caption("올리면 지원·투표·팀원·마감 표시를 모두 지우고, 명단의 학생과 빈 팀을 새로 만듭니다. 학생 비밀번호는 모두 1234입니다.")
+    st.file_uploader("명단 CSV (student_no, name, main_role, sub_roles)", type=["csv"], key="admin_roster_file")
+    st.number_input("팀 수", min_value=1, max_value=20, value=3, step=1, key="admin_team_count")
+    st.button("명단으로 처음 상태 만들기", key="admin_start", type="primary", on_click=on_admin_start, args=(user,))
+
+    with db.connection() as conn:
+        students = conn.execute("select count(*) as n from tf_students where not is_admin").fetchone()["n"]
+        teams = conn.execute("select count(*) as n from tf_teams").fetchone()["n"]
+        closed = service.is_closed(conn)
+    st.caption(f"지금 상태: 학생 {students}명, 팀 {teams}개, {'마감됨' if closed else '모집 중'}")
 
 
 def main() -> None:

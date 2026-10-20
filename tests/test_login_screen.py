@@ -61,7 +61,8 @@ def test_admin_logs_in_and_sees_admin_screen():
     assert not at.exception
     assert at.session_state["user_id"] is not None
     assert result_text(at).startswith("승인")
-    assert any("관리자" in s.value for s in at.subheader)
+    assert "명단 올리기" in [s.value for s in at.subheader]
+    assert at.button(key="admin_start") is not None
 
 
 def test_admin_number_only_is_blocked():
@@ -81,7 +82,8 @@ def test_student_logs_in_without_admin_screen(temp_student):
     assert not at.exception
     assert result_text(at).startswith("승인")
     subheaders = [s.value for s in at.subheader]
-    assert "팀 목록" in subheaders and "관리자" not in subheaders
+    assert "팀 목록" in subheaders and "명단 올리기" not in subheaders
+    assert not [b for b in at.button if b.key and b.key.startswith("admin_")]
 
 
 def test_logout_returns_to_login_screen(temp_student):
@@ -89,3 +91,10 @@ def test_logout_returns_to_login_screen(temp_student):
     at.button(key="logout").click().run()
     assert "user_id" not in at.session_state
     assert at.text_input(key="login_student_no") is not None
+
+
+def test_admin_start_without_file_is_blocked():
+    at = run_login("admin", ADMIN_PASSWORD)
+    at.number_input(key="admin_team_count").set_value(4)
+    at.button(key="admin_start").click().run()
+    assert result_text(at) == "막힘: 명단 CSV 파일을 올리지 않음"
