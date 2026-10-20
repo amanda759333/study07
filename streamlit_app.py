@@ -21,12 +21,21 @@ def prepare_admin() -> str:
         return service.ensure_admin(conn, get_secret("ADMIN_PASSWORD"))
 
 
+RESULT_WORDS = ("승인", "대기", "거절", "막힘")
+
+
 def set_result(message: str) -> None:
-    """단추를 누른 결과 안내. "승인", "대기", "거절", "막힘" 가운데 하나로 시작한다(공고 2.7)."""
+    """단추를 누른 결과 안내를 남긴다. 누른 사람의 세션에만 남으므로 그 사람 화면에만 보인다(공고 2.7).
+
+    채점 프로그램은 첫 단어만 보므로 "승인", "대기", "거절", "막힘" 가운데 하나로 시작하지 않으면 오류를 낸다.
+    """
+    if not message.startswith(RESULT_WORDS):
+        raise ValueError(f"결과 안내는 {', '.join(RESULT_WORDS)} 가운데 하나로 시작해야 함: {message[:20]}")
     st.session_state["result"] = message
 
 
 def show_result() -> None:
+    """[공고 2.7] 단추를 누른 결과 안내는 key가 result인 st.container 안에 보인다. 한 화면에 하나만 둔다."""
     with st.container(key="result"):
         message = st.session_state.get("result")
         if message:
