@@ -1,0 +1,28 @@
+# 비밀 값 — 절대 커밋 금지
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# 도구
+.ipynb_checkpoints/
+.pytest_cache/
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 제출용 압축 파일
+*.zip
