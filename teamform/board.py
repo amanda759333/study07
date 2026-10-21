@@ -2,7 +2,7 @@
 # 작성일시: 2026-10-21 01:03 (KST)
 """지금의 팀 구성을 DB에서 한 번에 읽는다.
 
-화면을 그릴 때와 지원·투표를 판정할 때 같은 모양의 데이터를 쓴다. 질의는 5번이고 연결은 db.connection()이 다시 쓴다.
+화면을 그릴 때와 지원·투표를 판정할 때 같은 모양의 데이터를 쓴다. 질의는 6번이고 연결은 db.connection()이 다시 쓴다.
 """
 from dataclasses import dataclass, field
 
@@ -54,6 +54,7 @@ class Team:
 class Board:
     teams: list[Team]
     closed: bool
+    unassigned: list[Member] = field(default_factory=list)  # 팀이 없는 학생(관리자 제외), 학번 순
 
     def team_by_no(self, no: int) -> Team | None:
         return self.teams[no - 1] if 1 <= no <= len(self.teams) else None
@@ -110,5 +111,14 @@ def load_board(conn) -> Board:
     ):
         apps[r["application_id"]].votes[r["voter_id"]] = r["vote"]
 
+    unassigned = [
+        _member(r)
+        for r in conn.execute(
+            f"""select {_STUDENT_COLUMNS} from tf_students s
+                where not s.is_admin and not exists (select 1 from tf_members m where m.student_id = s.id)
+                order by s.student_no"""
+        )
+    ]
+
     closed = conn.execute("select value from tf_settings where key = 'closed'").fetchone()
-    return Board(teams=teams, closed=closed is not None and closed["value"] == "true")
+    return Board(teams=teams, closed=closed is not None and closed["value"] == "true", unassigned=unassigned)

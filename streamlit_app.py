@@ -222,6 +222,29 @@ def admin_screen(user: service.User) -> None:
     for team in board.teams:
         team_card(team)
 
+    st.subheader("모집 마감")
+    st.caption("누르면 지원·투표를 받지 않고, 대기 중인 지원은 거절되며, 1명뿐인 팀의 학생은 팀에서 빠집니다.")
+    st.button("모집 마감", key="admin_close", disabled=board.closed, on_click=on_admin_close, args=(user,))
+
+    # [공고 2.7] 팀이 없는 학생 표시. 마감 결과(1명 팀에서 빠진 학생)도 여기서 확인한다
+    st.markdown("**팀이 없는 학생**")
+    with st.container(key="unassigned", border=True):
+        if board.unassigned:
+            st.markdown("\n".join(f"- {m.name} ({m.student_no}) — {m.roles_text()}" for m in board.unassigned))
+        else:
+            st.markdown("팀이 없는 학생이 없음")
+
+
+def on_admin_close(user: service.User) -> None:
+    """모집 마감 단추(admin_close). 해냈으면 "승인", 못 했으면 "막힘"으로 시작한다(공고 2.7)."""
+    try:
+        with db.connection() as conn:
+            set_result(service.close(conn, user))
+    except PermissionError:
+        set_result("막힘: 관리자만 쓸 수 있음")
+    except Exception as exc:
+        set_result(f"막힘: {db.safe_error(exc)}")
+
 
 def main() -> None:
     status = secret_status()

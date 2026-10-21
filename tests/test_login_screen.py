@@ -9,10 +9,12 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg.rows import dict_row
 from streamlit.testing.v1 import AppTest
 
 from teamform import service
 from teamform.config import get_secret
+from tests.scenarios import EASY, csv_bytes
 
 ADMIN_PASSWORD = get_secret("ADMIN_PASSWORD")
 DATABASE_URL = get_secret("DATABASE_URL")
@@ -98,3 +100,18 @@ def test_admin_start_without_file_is_blocked():
     at.number_input(key="admin_team_count").set_value(4)
     at.button(key="admin_start").click().run()
     assert result_text(at) == "막힘: 명단 CSV 파일을 올리지 않음"
+
+
+def test_admin_close_and_unassigned():
+    """[공고 2.7] admin_close의 result와 unassigned(팀이 없는 학생 이름). 끝나면 명단을 다시 올려 마감을 푼다."""
+    with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
+        service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(EASY), 3)
+    try:
+        at = run_login("admin", ADMIN_PASSWORD)
+        assert any("학생1 (2026101)" in m.value for m in at.markdown)  # 마감 전에도 팀이 없는 학생이 보임
+        at.button(key="admin_close").click().run()
+        assert result_text(at) == "승인: 모집을 마감함(대기 지원 0건 거절, 1명뿐인 팀의 학생 0명 빠짐)"
+        assert at.button(key="admin_close").disabled
+    finally:
+        with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
+            service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(EASY), 3)

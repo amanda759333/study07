@@ -287,3 +287,33 @@ def vote(conn, voter: User, applicant_no: str, yes: bool) -> str:
     # [공고 2.4 「아직 투표하지 않은 팀원이 있음」] 대기
     yes_count = sum(1 for m in team.members if application.votes.get(m.id) == "찬성")
     return f"대기: 팀원 {len(team.members)}명 가운데 {yes_count}명 찬성"
+
+
+# 모집 마감 -------------------------------------------------------------------
+
+
+def close(conn, user: User | None) -> str:
+    """[공고 2.5-1, 2.5-2] 모집을 마감한다. 결과 안내를 돌려준다.
+
+    마감 뒤로는 지원과 투표를 할 수 없다. 대기 중인 지원은 거절되고,
+    그다음 1명뿐인 팀의 학생은 팀에서 빠져 "팀이 없는 학생"이 된다.
+    """
+    require_admin(user)
+    # 지원·투표(for share)가 끝나기를 기다렸다가 마감한다
+    row = conn.execute("select value from tf_settings where key = 'closed' for update").fetchone()
+    if row is not None and row["value"] == "true":
+        return "막힘: 이미 마감됨"
+    conn.execute(
+        """insert into tf_settings (key, value) values ('closed', 'true')
+           on conflict (key) do update set value = excluded.value"""
+    )
+    # [공고 2.5-2, 2.4 「막힘과 거절의 차이」] 마감 때 대기 중인 지원은 거절
+    rejected = conn.execute(
+        "update tf_applications set status = '거절', reason = '모집 마감' where status = '대기'"
+    ).rowcount
+    # [공고 2.5-2] 1명뿐인 팀의 학생은 팀에서 빠짐
+    removed = conn.execute(
+        """delete from tf_members m
+           where (select count(*) from tf_members x where x.team_id = m.team_id) = 1"""
+    ).rowcount
+    return f"승인: 모집을 마감함(대기 지원 {rejected}건 거절, 1명뿐인 팀의 학생 {removed}명 빠짐)"
