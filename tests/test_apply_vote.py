@@ -2,8 +2,8 @@
 # 작성일시: 2026-10-21 01:03 (KST)
 """#9 지원과 투표를 공고 부록 시나리오의 단계대로 실행한다(DB, 트랜잭션은 되돌림).
 
-결과 안내의 첫 단어가 부록의 기대 결과와 같은지 본다. 어려움 8단계(승인 직전 검사)와
-11단계(필수 포함 역할 자리)는 공고 3장의 어려운 해결이라 작업 #14에서 더하므로 여기서는 뺀다.
+결과 안내의 첫 단어가 부록의 기대 결과와 같은지 본다. 어려움 8단계(승인 직전 검사)는
+공고 3장의 어려운 해결이라 작업 #14에서 더하므로 여기서는 뺀다.
 """
 import pytest
 
@@ -79,7 +79,7 @@ def test_medium_steps_1_to_8(conn):
     assert p.apply("학생12", 3) == "막힘: 결과를 기다리는 지원이 있음"
 
 
-def test_hard_steps_without_14(conn):
+def test_hard_steps_except_8(conn):
     p = Play(conn, HARD, 4)
     assert first(p.apply("학생1", 1)) == "승인"                      # 1
     assert first(p.apply("학생4", 1)) == "대기"                      # 2
@@ -98,7 +98,9 @@ def test_hard_steps_without_14(conn):
     assert first(p.apply("학생11", 3)) == "승인"                     # 9
     assert first(p.apply("학생15", 3)) == "대기"                     # 10
     assert first(p.vote("학생11", "학생15")) == "승인"
-    # 11단계(필수 포함 역할 자리)는 #14에서
+    apps_before = p.count("tf_applications")
+    assert p.apply("학생14", 3) == "막힘: 필수 포함 역할을 맡을 학생의 자리가 모자람"  # 11 막힘(필수 포함 역할 자리)
+    assert p.count("tf_applications") == apps_before                                   # 뒤의 투표는 건너뜀
     assert first(p.apply("학생10", 4)) == "승인"                     # 12
     assert first(p.apply("학생13", 1)) == "대기"                     # 13 학생1만 찬성: 대기
     assert first(p.vote("학생1", "학생13")) == "대기"

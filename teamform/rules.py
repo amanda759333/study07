@@ -6,20 +6,28 @@
 거절 = 접수되어 대기하던 지원이 팀원의 거부, 승인 직전 검사, 모집 마감으로 떨어진 것.
 
 아직 넣지 않은 분기(공고가 「3장의 어려운 해결」로 적은 것, 교수님 작업 순서 #14에서 더함):
-- 막힘 이유 「필수 포함 역할을 맡을 학생의 자리가 모자람」
 - 「승인 직전」 규칙 재검사
 """
 from teamform.board import MAX_MEMBERS, Application, Board, Member, Team
 
 
 def check_join(team: Team, applicant: Member) -> str | None:
-    """이 팀에 이 학생을 넣어도 되는지. 막는 이유를 돌려주고, 괜찮으면 None."""
+    """이 팀에 이 학생을 넣어도 되는지. 정원 → 주 역할 중복 → 필수 포함 역할 자리 순으로 보고,
+    막는 이유를 돌려준다. 괜찮으면 None."""
     # [공고 2.4 「팀이 꽉 참」] 4명인 팀에는 지원할 수 없음
     if len(team.members) >= MAX_MEMBERS:
         return "팀이 꽉 참"
     # [공고 2.4 「같은 주 역할」, 2.3 「주 역할 중복」] 주 역할이 중복되는 팀원이 있는 팀에는 지원할 수 없음
     if any(m.main_role == applicant.main_role for m in team.members):
         return "같은 주 역할의 팀원이 있음"
+    # [공고 2.4 「막힌 지원」, 3장 「필수 포함 역할을 지킬 수 없는 팀」 어려운 해결, 「필수 포함 역할 자리 계산」]
+    # 지원자가 들어간 뒤 남는 자리 수가, 그 팀에서 아직 채우지 못한 필수 포함 역할 수보다 적으면 막는다.
+    # 지원자 자신도 필수 포함 역할을 채울 수 있으므로 지원자를 넣은 뒤로 센다
+    after = [*team.members, applicant]
+    left = MAX_MEMBERS - len(after)
+    missing = 2 - required_filled(after)  # 한 학생이 둘 다 할 수 있어도 하나로만 센다
+    if left < missing:
+        return "필수 포함 역할을 맡을 학생의 자리가 모자람"
     return None
 
 
