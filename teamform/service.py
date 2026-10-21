@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 import bcrypt
 
+from teamform import rules
+from teamform.board import MAX_MEMBERS, Member, load_board
 from teamform.roster import ADMIN_NO, parse_roster
 
 ADMIN_NAME = "관리자"
@@ -170,3 +172,118 @@ def reset_roster(conn, user: User | None, csv_bytes: bytes, team_count: int) -> 
         cur.executemany("insert into tf_teams (name) values (%s)", [(f"팀{n}",) for n in range(1, team_count + 1)])
 
     return f"승인: 명단 {len(rows)}명, 팀 {team_count}개로 처음 상태를 만듦"
+
+
+# 지원과 투표 -----------------------------------------------------------------
+# 결과 안내는 "승인", "대기", "거절", "막힘" 가운데 하나로 시작하고 이유를 붙인다(공고 2.4, 2.7).
+# 같은 팀에 대한 지원·투표가 동시에 들어와도 차례로 처리되도록 마감 표시 → 지원자 → 팀 순서로 행을 잠근다.
+
+
+def _as_member(user: User) -> Member:
+    return Member(user.id, user.student_no, user.name, user.main_role, user.sub_roles)
+
+
+def _lock(conn, applicant_id: int, team_id: int) -> None:
+    conn.execute("select value from tf_settings where key = 'closed' for share")  # 마감(close)과 엇갈리지 않게
+    conn.execute("select id from tf_students where id = %s for update", (applicant_id,))
+    conn.execute("select id from tf_teams where id = %s for update", (team_id,))
+
+
+def _add_member(conn, team_id: int, student_id: int) -> bool:
+    """빈 자리 가운데 가장 앞 번호에 넣는다. 자리가 없으면 False(DB의 slot_no 1~4 제약과 같은 기준)."""
+    used = {r["slot_no"] for r in conn.execute("select slot_no from tf_members where team_id = %s", (team_id,))}
+    free = [n for n in range(1, MAX_MEMBERS + 1) if n not in used]
+    if not free:
+        return False
+    conn.execute("insert into tf_members (team_id, slot_no, student_id) values (%s, %s, %s)", (team_id, free[0], student_id))
+    return True
+
+
+def apply(conn, user: User, team_no: int) -> str:
+    """팀에 지원한다(공고 2.4). 결과 안내를 돌려준다."""
+    if user.is_admin:
+        return "막힘: 관리자는 지원하지 않음"
+    team_row = conn.execute(
+        "select id from tf_teams order by id offset %s limit 1", (max(team_no, 1) - 1,)
+    ).fetchone()
+    if team_no < 1 or team_row is None:
+        return "막힘: 없는 팀"
+    _lock(conn, user.id, team_row["id"])
+    board = load_board(conn)  # 잠근 뒤의 상태로 판정한다
+    team = board.team_by_id(team_row["id"])
+    me = _as_member(user)
+
+    # [공고 2.4 「막힌 지원」] 단추를 누른 순간 규칙을 검사해 지원을 접수하지 않는다. DB에 기록하지 않는다
+    reason = rules.check_apply(board, me, team)
+    if reason:
+        return f"막힘: {reason}"
+
+    # [공고 2.4 「빈 팀에 지원」] 투표할 팀원이 없으므로 바로 승인
+    if not team.members:
+        conn.execute(
+            "insert into tf_applications (team_id, student_id, status, reason) values (%s, %s, '승인', '빈 팀')",
+            (team.id, me.id),
+        )
+        _add_member(conn, team.id, me.id)
+        return f"승인: {team.name}에 들어감"
+
+    # [공고 2.4 「팀원이 있는 팀에 지원」] 대기. 그 팀의 팀원 모두가 투표한다
+    conn.execute("insert into tf_applications (team_id, student_id) values (%s, %s)", (team.id, me.id))
+    return f"대기: {team.name}의 팀원 {len(team.members)}명이 투표해야 함"
+
+
+def vote(conn, voter: User, applicant_no: str, yes: bool) -> str:
+    """내 팀에 들어온 지원에 찬성 또는 거부를 누른다. 결과 안내는 그 지원의 지금 상태로 시작한다(공고 2.7)."""
+    if voter.is_admin:
+        return "막힘: 관리자는 투표하지 않음"
+    applicant = conn.execute("select id, name from tf_students where student_no = %s", (applicant_no,)).fetchone()
+    my_team = conn.execute("select team_id from tf_members where student_id = %s", (voter.id,)).fetchone()
+    if applicant is None or my_team is None:
+        return "막힘: 내 팀에 들어온 지원이 아님"
+    _lock(conn, applicant["id"], my_team["team_id"])
+    board = load_board(conn)
+    team = board.team_of(voter.id)
+    # [공고 2.4 「팀원이 있는 팀에 지원」] 투표하는 사람은 투표하는 때의 팀원이다
+    if team is None or team.id != my_team["team_id"]:
+        return "막힘: 내 팀에 들어온 지원이 아님"
+
+    latest = conn.execute(
+        """select id, status, reason from tf_applications
+           where student_id = %s and team_id = %s order by created_at desc, id desc limit 1""",
+        (applicant["id"], team.id),
+    ).fetchone()
+    if latest is None:
+        return "막힘: 내 팀에 들어온 지원이 아님"
+    if latest["status"] != "대기":
+        # 다른 팀원의 거부 등으로 이미 결과가 나온 지원. 그 지원의 지금 상태를 보인다(공고 2.7)
+        return f"{latest['status']}: 이미 결과가 나온 지원임({latest['reason'] or '이유 없음'})"
+    # [공고 2.5-1] 마감 뒤로는 투표할 수 없음
+    if board.closed:
+        return "막힘: 모집이 마감됨"
+
+    application = next(a for a in team.pending if a.id == latest["id"])
+    # [공고 2.4 「투표 바꾸기」] 한 번 투표하면 바꿀 수 없음
+    if voter.id in application.votes:
+        return f"대기: 이미 {application.votes[voter.id]}함(투표는 바꿀 수 없음)"
+
+    choice = "찬성" if yes else "거부"
+    conn.execute("insert into tf_votes (application_id, voter_id, vote) values (%s, %s, %s)", (application.id, voter.id, choice))
+    application.votes[voter.id] = choice
+
+    outcome = rules.vote_outcome(team, application)
+    if outcome == "거절":
+        # [공고 2.4 「한 명이라도 거부」] 다른 팀원의 투표를 기다리지 않고 바로 거절
+        conn.execute("update tf_applications set status = '거절', reason = '팀원이 거부함' where id = %s", (application.id,))
+        return f"거절: 팀원이 거부함({voter.name})"
+    if outcome == "승인":
+        # [공고 2.4 「모든 팀원이 찬성」] 승인되어 그 팀의 팀원이 됨
+        # (승인 직전 규칙 재검사는 공고 3장의 어려운 해결로, 작업 #14에서 이 자리에 더한다)
+        if not _add_member(conn, team.id, application.applicant.id):
+            # 자리가 없으면 DB 제약(slot_no 1~4)이 다섯 번째 팀원을 막는다
+            conn.execute("update tf_applications set status = '거절', reason = '팀이 꽉 참' where id = %s", (application.id,))
+            return "거절: 팀이 꽉 참"
+        conn.execute("update tf_applications set status = '승인', reason = '모든 팀원 찬성' where id = %s", (application.id,))
+        return f"승인: {application.applicant.name}이(가) {team.name}에 들어감"
+    # [공고 2.4 「아직 투표하지 않은 팀원이 있음」] 대기
+    yes_count = sum(1 for m in team.members if application.votes.get(m.id) == "찬성")
+    return f"대기: 팀원 {len(team.members)}명 가운데 {yes_count}명 찬성"

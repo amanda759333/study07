@@ -100,13 +100,47 @@ def apply_block_reason(board: Board, user: service.User) -> str | None:
 
 
 def on_apply(user: service.User, team_no: int) -> None:
-    set_result("막힘: 지원 기능은 다음 작업(#9)에서 만듦")
+    """팀에 지원하는 단추(apply_1, …). result에 그 지원의 결과를 보인다(공고 2.7)."""
+    try:
+        with db.connection() as conn:
+            set_result(service.apply(conn, user, team_no))
+    except Exception as exc:
+        set_result(f"막힘: {db.safe_error(exc)}")
+
+
+def on_vote(user: service.User, applicant_no: str, yes: bool) -> None:
+    """찬성(vote_yes_학번)·거부(vote_no_학번) 단추. result에 그 지원의 지금 상태를 보인다(공고 2.7)."""
+    try:
+        with db.connection() as conn:
+            set_result(service.vote(conn, user, applicant_no, yes))
+    except Exception as exc:
+        set_result(f"막힘: {db.safe_error(exc)}")
+
+
+def pending_list(team: Team, me: service.User) -> None:
+    """내 팀에 들어온 지원과 찬성·거부 단추."""
+    if not team.pending:
+        return
+    st.markdown("**결과를 기다리는 지원**")
+    for application in team.pending:
+        a = application.applicant
+        yes = sum(1 for m in team.members if application.votes.get(m.id) == "찬성")
+        line = f"{a.name} ({a.student_no}) — {a.roles_text()} · 찬성 {yes}/{len(team.members)}"
+        my_vote = application.votes.get(me.id)
+        if my_vote:
+            # [공고 2.8] 이미 투표한 지원은 단추를 숨기고 "내 투표: 찬성"처럼 보인다
+            st.markdown(f"{line} · 내 투표: {my_vote}")
+            continue
+        left, yes_col, no_col = st.columns([4, 1, 1])
+        left.markdown(line)
+        yes_col.button("찬성", key=f"vote_yes_{a.student_no}", on_click=on_vote, args=(me, a.student_no, True))
+        no_col.button("거부", key=f"vote_no_{a.student_no}", on_click=on_vote, args=(me, a.student_no, False))
 
 
 def team_card(team: Team, me: service.User | None = None, block: str | None = None) -> None:
     """[공고 2.7] 팀 하나의 표시. key는 team_1, team_2, … 이고 팀원의 이름이 보인다.
 
-    me가 있으면 학생 화면이다: 지원 단추(apply_1, …)를 둔다.
+    me가 있으면 학생 화면이다: 지원 단추(apply_1, …)를 두고, 내 팀이면 들어온 지원과 투표 단추를 둔다.
     """
     with st.container(key=f"team_{team.no}", border=True):
         mine = me is not None and team.has_member(me.id)
@@ -124,6 +158,8 @@ def team_card(team: Team, me: service.User | None = None, block: str | None = No
                 on_click=on_apply,
                 args=(me, team.no),
             )
+            if mine:
+                pending_list(team, me)
 
 
 def student_screen(user: service.User) -> None:

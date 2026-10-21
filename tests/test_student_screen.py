@@ -92,3 +92,43 @@ def test_closed_disables_buttons(board_state):
         c.execute("update tf_settings set value = 'true' where key = 'closed'")
     at = login_as("학생5")
     assert apply_disabled(at) == [True, True, True]
+
+
+# #9 단추를 실제로 누르기 ------------------------------------------------------
+
+def result_of(at):
+    return " ".join(i.value for i in at.info)
+
+
+def test_apply_to_empty_team_then_buttons_disable(board_state):
+    at = login_as("학생5")
+    at.button(key="apply_2").click().run()
+    assert result_of(at) == "승인: 팀2에 들어감"
+    assert "내 팀: **팀2**" in texts(at)
+    assert apply_disabled(at) == [True, True, True]
+
+
+def test_blocked_apply_shows_reason(board_state):
+    at = login_as("학생2")  # 주 역할 기획자. 팀1에는 기획자 학생1이 있음
+    at.button(key="apply_1").click().run()
+    assert result_of(at) == "막힘: 같은 주 역할의 팀원이 있음"
+
+
+def test_vote_buttons_then_my_vote_shown(board_state):
+    """[공고 2.8] 이미 투표한 지원은 찬성·거부 단추를 숨기고 "내 투표: 찬성"을 보인다."""
+    at = login_as("학생1")
+    assert at.button(key="vote_yes_2026107") is not None and at.button(key="vote_no_2026107") is not None
+    at.button(key="vote_yes_2026107").click().run()
+    assert result_of(at) == "대기: 팀원 2명 가운데 1명 찬성"
+    assert not [b for b in at.button if b.key in ("vote_yes_2026107", "vote_no_2026107")]
+    assert any("내 투표: 찬성" in m.value for m in at.markdown)
+
+    other = login_as("학생4")
+    other.button(key="vote_yes_2026107").click().run()
+    assert result_of(other) == "승인: 학생7이(가) 팀1에 들어감"
+
+
+def test_vote_no_rejects(board_state):
+    at = login_as("학생4")
+    at.button(key="vote_no_2026107").click().run()
+    assert result_of(at) == "거절: 팀원이 거부함(학생4)"
