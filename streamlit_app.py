@@ -83,10 +83,10 @@ def login_screen() -> None:
 
 def header(user: service.User) -> None:
     with st.container(key="whoami"):
-        left, middle, right = st.columns([3, 1, 1])
+        left, right = st.columns([4, 1])
         left.markdown(f"**{user.name}** ({user.student_no})  \n{roles_text(user)}")
-        # [공고 2.7] 새로 고침 단추는 학생 화면과 관리자 화면 양쪽에 둔다. 누르면 화면 전체를 다시 그린다
-        middle.button("새로 고침", key="refresh")
+        # 새로 고침 단추(refresh)는 두지 않는다. 공고 2.7절 표는 「다른 사람의 변경 보기」를 쉬운 해결로 만든 앱만
+        # 두라고 하고, 이 앱은 어려운 해결(st.fragment로 LIVE_SECONDS초마다 다시 그림)을 했다
         right.button("로그아웃", key="logout", on_click=logout)
 
 

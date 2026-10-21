@@ -156,14 +156,13 @@ def test_admin_assign_shows_status(monkeypatch):
 
 
 
-def test_refresh_button_on_both_screens(temp_student):
-    """[공고 2.7] 새로 고침 단추(refresh)를 학생 화면과 관리자 화면 양쪽에 둔다."""
+def test_no_refresh_button_with_auto_update(temp_student):
+    """[공고 2.7] 새로 고침 단추(refresh)는 「다른 사람의 변경 보기」를 쉬운 해결로 만든 앱만 둔다.
+    이 앱은 어려운 해결(자동으로 다시 그림)을 했으므로 학생·관리자 화면 모두 두지 않는다."""
     student = run_login(temp_student, "1234")
-    assert student.button(key="refresh") is not None
-    student.button(key="refresh").click().run()
-    assert not student.exception and "user_id" in student.session_state
+    assert not [b for b in student.button if b.key == "refresh"]
     admin = run_login("admin", ADMIN_PASSWORD)
-    assert admin.button(key="refresh") is not None
+    assert not [b for b in admin.button if b.key == "refresh"]
 
 
 def test_all_models_fail_app_assigns(monkeypatch):

@@ -67,7 +67,7 @@ def vote_outcome(team: Team, application: Application) -> str:
 def check_plan_format(board: Board, plan: list[tuple[str, int]]) -> list[str]:
     """AI 배정안의 형식 검사: 팀이 없는 학생만, 있는 팀에 넣었는지. 어긴 것을 모두 돌려준다.
 
-    공고 2.5-4의 검사 다섯 가지는 작업 #12에서 check_assignment로 더한다.
+    공고 2.5-4의 검사 다섯 가지를 하는 check_assignment가 맨 먼저 부른다.
     """
     unassigned = {m.student_no for m in board.unassigned}
     problems = []
