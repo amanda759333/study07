@@ -117,18 +117,21 @@ def test_parse_plan_rejects(content):
 
 
 def board_after_close():
-    pl = Member(1, "2026101", "학생1", "기획자", ("보고서 작성자",))
-    s7 = Member(7, "2026107", "학생7", "프론트엔드 디자이너", ("발표자",))
-    return Board([Team(1, 1, "팀1", [pl]), Team(2, 2, "팀2")], closed=True, unassigned=[s7])
+    """팀1: 기획자 1명, 팀2: 기획자·웹 프로그래머. 팀이 없는 학생4(웹 프로그래머)를 팀1에 넣으면 규칙을 지킨다."""
+    pl1 = Member(1, "2026101", "학생1", "기획자", ("보고서 작성자",))
+    pl2 = Member(2, "2026102", "학생2", "기획자", ())
+    wp5 = Member(5, "2026105", "학생5", "웹 프로그래머", ())
+    wp4 = Member(4, "2026104", "학생4", "웹 프로그래머", ("프론트엔드 디자이너",))
+    return Board([Team(1, 1, "팀1", [pl1]), Team(2, 2, "팀2", [pl2, wp5])], closed=True, unassigned=[wp4])
 
 
 def test_prompt_has_rules_teams_and_unassigned_without_names():
     prompt = build_prompt(board_after_close())
     assert "2~4명" in prompt and "서로 다른 사람으로 1명씩" in prompt and "주 역할이 동일한" in prompt
     assert "팀1 (1명): 2026101(주 역할 기획자, 보조 역할 보고서 작성자)" in prompt
-    assert "팀2 (0명): 팀원 없음" in prompt
-    assert "2026107: 주 역할 프론트엔드 디자이너, 보조 역할 발표자" in prompt
-    assert "학생1" not in prompt and "학생7" not in prompt  # 이름은 보내지 않음
+    assert "팀2 (2명): 2026102(주 역할 기획자, 보조 역할 없음); 2026105(주 역할 웹 프로그래머, 보조 역할 없음)" in prompt
+    assert "2026104: 주 역할 웹 프로그래머, 보조 역할 프론트엔드 디자이너" in prompt
+    assert "학생1" not in prompt and "학생4" not in prompt  # 이름은 보내지 않음
 
 
 # service.propose ----------------------------------------------------------------
@@ -144,16 +147,18 @@ def test_propose_needs_close_and_admin():
         service.propose(service.User(1, "2026101", "학생1", "기획자", (), False), board_after_close())
 
 
-def test_propose_uses_format_check(monkeypatch):
+def test_propose_uses_five_checks(monkeypatch):
     answers = iter([
-        '{"assignments": [{"student_no": "2026101", "team_no": 2}]}',  # 이미 팀이 있는 학생을 옮김 → 검사 실패
-        '{"assignments": [{"student_no": "2026107", "team_no": 9}]}',  # 없는 팀 → 검사 실패
-        '{"assignments": [{"student_no": "2026107", "team_no": 1}]}',
+        '{"assignments": [{"student_no": "2026104", "team_no": 2}]}',  # 팀2에 웹 프로그래머 둘, 팀1은 1명 → 검사 실패
+        '{"assignments": [{"student_no": "2026104", "team_no": 9}]}',  # 없는 팀 → 검사 실패
+        '{"assignments": [{"student_no": "2026104", "team_no": 1}]}',
     ])
     monkeypatch.setattr(ai, "call_model", lambda model, prompt, timeout: next(answers))
     message, result = service.propose(ADMIN, board_after_close())
     assert message == "승인: 3차 모델의 배정안이 검사를 통과함"
-    assert [a.detail for a in result.attempts[:2]] == ["2026101은 팀이 없는 학생이 아님", "팀9은 없는 팀"]
+    assert result.attempts[0].detail.startswith("③ 팀1이 1명임(2~4명이어야 함)")
+    assert result.attempts[1].detail.startswith("팀9은 없는 팀")
+    assert result.plan == [("2026104", 1)]
 
 
 def test_propose_all_fail(monkeypatch):
@@ -163,3 +168,16 @@ def test_propose_all_fail(monkeypatch):
     monkeypatch.setattr(ai, "call_model", fail)
     message, result = service.propose(ADMIN, board_after_close())
     assert message == "막힘: 3차 모델까지 실패함" and len(result.attempts) == 3
+
+
+def test_impossible_board_does_not_call_ai(monkeypatch):
+    """[공고 2.5-8] 규칙을 지키는 배정이 없으면 AI를 부르지 않고 이유를 보인다."""
+    def must_not_call(model, prompt, timeout):
+        raise AssertionError("AI를 부르면 안 됨")
+
+    monkeypatch.setattr(ai, "call_model", must_not_call)
+    board = board_after_close()
+    board.teams[1].members.pop()  # 팀2에서 웹 프로그래머가 빠짐 → 웹 프로그래머가 팀 둘 다 필요한데 학생4 한 명뿐
+    message, result = service.propose(ADMIN, board)
+    assert message.startswith("막힘: 규칙을 지키는 배정이 없음: ") and result is None
+    assert "웹 프로그래머가 없는 팀은 2개인데 웹 프로그래머를 맡을 수 있는 팀이 없는 학생은 1명임" in message

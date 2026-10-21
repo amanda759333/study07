@@ -69,3 +69,80 @@ def check_plan_format(board: Board, plan: list[tuple[str, int]]) -> list[str]:
         if board.team_by_no(team_no) is None:
             problems.append(f"팀{team_no}은 없는 팀")
     return problems
+
+
+# 배정안 검사(공고 2.5-4) ---------------------------------------------------------
+
+PLANNER, WEB = "기획자", "웹 프로그래머"  # [공고 2.3 「필수 포함 역할」]
+
+
+def can_play(member: Member, role: str) -> bool:
+    """[공고 2.3] 필수 포함 역할은 주 역할이나 보조 역할로 맡을 수 있다."""
+    return member.main_role == role or role in member.sub_roles
+
+
+def required_filled(members) -> int:
+    """필수 포함 역할(기획자, 웹 프로그래머) 가운데 채운 수(0~2).
+
+    [공고 3장 「필수 포함 역할 자리 계산」] 기획자와 웹 프로그래머는 서로 다른 학생이 맡아야 하므로,
+    한 학생이 둘 다 할 수 있어도 하나로만 센다. 예: 기획자이면서 보조 역할이 웹 프로그래머인 학생 혼자면 1.
+    """
+    planners = [m for m in members if can_play(m, PLANNER)]
+    webs = [m for m in members if can_play(m, WEB)]
+    if any(p.id != w.id for p in planners for w in webs):
+        return 2
+    return 1 if planners or webs else 0
+
+
+def _who(members) -> str:
+    return ", ".join(m.name for m in members) or "없음"
+
+
+def teams_after(board: Board, plan: list[tuple[str, int]]) -> dict[int, list[Member]]:
+    """배정안대로 넣은 뒤의 팀 번호 → 팀원. 배정안에 같은 학생이 두 번 있으면 두 번 다 넣는다(검사 ②가 잡는다)."""
+    by_no = {m.student_no: m for m in board.unassigned}
+    after = {t.no: list(t.members) for t in board.teams}
+    for student_no, team_no in plan:
+        if student_no in by_no and team_no in after:
+            after[team_no].append(by_no[student_no])
+    return after
+
+
+def check_assignment(board: Board, plan: list[tuple[str, int]]) -> list[str]:
+    """배정안이 공고 2.5-4의 검사 다섯 가지를 지키는지. 어긴 항목과 이유를 모두 돌려주고, 통과하면 빈 목록."""
+    problems = check_plan_format(board, plan)  # 이미 팀이 있는 학생을 옮기거나 없는 팀에 넣은 배정안
+    names = {m.student_no: m.name for m in board.unassigned}
+    placed: dict[str, list[int]] = {}
+    for student_no, team_no in plan:
+        placed.setdefault(student_no, []).append(team_no)
+
+    # ① 팀이 없는 학생이 빠짐없이 배정됨
+    for m in board.unassigned:
+        if m.student_no not in placed:
+            problems.append(f"① {m.name}({m.student_no})이 배정되지 않음")
+    # ② 한 학생은 한 팀에만 배정됨
+    for student_no, team_nos in placed.items():
+        if len(team_nos) > 1:
+            teams = ", ".join(f"팀{n}" for n in team_nos)
+            problems.append(f"② {names.get(student_no, student_no)}({student_no})이 여러 번 배정됨({teams})")
+
+    for team_no, members in teams_after(board, plan).items():
+        # ③ 모든 팀이 2~4명 [공고 2.3 「인원」]
+        if not 2 <= len(members) <= MAX_MEMBERS:
+            problems.append(f"③ 팀{team_no}이 {len(members)}명임(2~4명이어야 함)")
+        # ④ 팀 안에 주 역할 중복 없음 [공고 2.3 「주 역할 중복」]
+        by_role: dict[str, list[Member]] = {}
+        for m in members:
+            by_role.setdefault(m.main_role, []).append(m)
+        for role, same in by_role.items():
+            if len(same) > 1:
+                problems.append(f"④ 팀{team_no}에 주 역할이 {role}인 학생이 {len(same)}명({_who(same)})")
+        # ⑤ 기획자와 웹 프로그래머가 서로 다른 사람으로 1명씩 [공고 2.3 「필수 포함 역할」]
+        if required_filled(members) < 2:
+            planners = [m for m in members if can_play(m, PLANNER)]
+            webs = [m for m in members if can_play(m, WEB)]
+            problems.append(
+                f"⑤ 팀{team_no}에 기획자와 웹 프로그래머를 서로 다른 사람으로 둘 수 없음"
+                f"(기획자 가능: {_who(planners)}, 웹 프로그래머 가능: {_who(webs)})"
+            )
+    return problems

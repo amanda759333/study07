@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import bcrypt
 
-from teamform import ai, rules
+from teamform import ai, rules, solver
 from teamform.board import MAX_MEMBERS, Member, load_board
 from teamform.roster import ADMIN_NO, parse_roster
 
@@ -323,23 +323,51 @@ def close(conn, user: User | None) -> str:
 
 
 def propose(user: User | None, board, *, on_wait=None, on_attempt=None) -> tuple[str, "ai.AssignResult | None"]:
-    """[공고 2.5-3~5] AI에게 배정안을 받는다. (결과 안내, 결과)를 돌려준다.
+    """[공고 2.5-3~8] AI에게 배정안을 받는다. (결과 안내, 결과)를 돌려준다.
 
     AI를 기다리는 동안 DB 연결을 붙잡지 않도록, 지금 상태(board)는 부르는 쪽이 먼저 읽어 넘긴다.
-    배정안 검사 다섯 가지(#12), 규칙을 지키는 배정이 없을 때(#13), 3차까지 실패하면 앱이 배정하기(#14)는 다음 작업에서 더한다.
+    3차까지 실패하면 앱이 스스로 배정하기(공고 2.5-6)는 작업 #14에서 더한다.
     """
     require_admin(user)
     # [공고 2.5-3] 마감 뒤 남은 학생을 배정한다
     if not board.closed:
         return "막힘: 모집이 마감되지 않음", None
+    # [공고 2.5-8] 규칙을 모두 지키는 배정이 없으면 배정안을 만들지 않고 이유를 보인다. 이때는 AI를 부르지 않는다
+    if solver.find_assignment(board) is None:
+        return "막힘: 규칙을 지키는 배정이 없음: " + "; ".join(solver.why_impossible(board)), None
     if not board.unassigned:
         return "막힘: 팀이 없는 학생이 없음", None
+    # [공고 2.5-4, 2.5-5] 검사 다섯 가지를 통과하지 못한 배정안은 실패로 보고 다음 모델로 넘어간다
     result = ai.ask_models(
         ai.build_prompt(board),
-        lambda plan: rules.check_plan_format(board, plan),
+        lambda plan: rules.check_assignment(board, plan),
         on_wait=on_wait,
         on_attempt=on_attempt,
     )
     if result.plan is None:
         return "막힘: 3차 모델까지 실패함", result
     return f"승인: {result.model_no}차 모델의 배정안이 검사를 통과함", result
+
+
+def confirm(conn, user: User | None, plan: list[tuple[str, int]] | None) -> str:
+    """[공고 2.5-7] 관리자가 확정한 배정안을 DB에 저장한다.
+
+    배정안을 받은 뒤 상태가 바뀌었을 수 있으므로 지금 상태로 검사 다섯 가지를 한 번 더 한다(PRD D-6).
+    """
+    require_admin(user)
+    if not plan:
+        return "막힘: 확정할 배정안이 없음"
+    conn.execute("select value from tf_settings where key = 'closed' for update")  # 명단 올리기와 엇갈리지 않게
+    conn.execute("select id from tf_teams order by id for update")
+    board = load_board(conn)
+    if not board.closed:
+        return "막힘: 모집이 마감되지 않음"
+    problems = rules.check_assignment(board, plan)
+    if problems:
+        return f"막힘: 배정안이 지금 상태와 맞지 않음({problems[0]})"
+    by_no = {m.student_no: m for m in board.unassigned}
+    for student_no, team_no in plan:
+        if not _add_member(conn, board.team_by_no(team_no).id, by_no[student_no].id):
+            # 검사를 통과했으므로 일어나지 않는다. 일어나면 예외로 트랜잭션 전체를 되돌린다(일부만 저장하지 않음)
+            raise RuntimeError("배정안을 저장하다 자리가 모자람")
+    return f"승인: 배정안을 확정함({len(plan)}명)"

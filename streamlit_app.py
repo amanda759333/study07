@@ -277,7 +277,38 @@ def assign_section(user: service.User, board: Board) -> None:
         for line in st.session_state.get("assign_log", []):
             st.markdown(f"- {line}")
         note = st.session_state.get("assign_note")
+        # [공고 2.5-8, 2.7] 규칙을 지키는 배정이 없으면 "규칙을 지키는 배정이 없음"과 이유가 여기에 보인다
         st.markdown(note if note else "아직 AI 배정을 하지 않음")
+
+    proposal = st.session_state.get("proposal")
+    if proposal:
+        # [공고 2.5-7] 검사를 통과한 배정안만 보인다: 학생의 이름과 역할, 배정된 팀
+        st.markdown("**배정안** (검사 다섯 가지를 통과함)")
+        people = {m.student_no: m for m in board.unassigned}
+        rows = [
+            {"팀": f"팀{team_no}", "이름": people[no].name if no in people else no, "학번": no,
+             "주 역할": people[no].main_role if no in people else "",
+             "보조 역할": ", ".join(people[no].sub_roles) if no in people else ""}
+            for no, team_no in sorted(proposal, key=lambda p: (p[1], p[0]))
+        ]
+        st.dataframe(rows, hide_index=True, use_container_width=True)
+    st.button("배정안 확정", key="admin_confirm", type="primary", disabled=not proposal,
+              on_click=on_admin_confirm, args=(user,))
+
+
+def on_admin_confirm(user: service.User) -> None:
+    """배정안 확정 단추(admin_confirm). 해냈으면 "승인", 못 했으면 "막힘"으로 시작한다(공고 2.7)."""
+    try:
+        with db.connection() as conn:
+            message = service.confirm(conn, user, st.session_state.get("proposal"))
+    except PermissionError:
+        message = "막힘: 관리자만 쓸 수 있음"
+    except Exception as exc:
+        message = f"막힘: {db.safe_error(exc)}"
+    set_result(message)
+    if message.startswith("승인"):
+        clear_assign()
+        st.session_state["assign_note"] = message
 
 
 def on_admin_close(user: service.User) -> None:
