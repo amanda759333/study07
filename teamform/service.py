@@ -337,14 +337,15 @@ def propose(user: User | None, board, *, on_wait=None, on_attempt=None) -> tuple
     """[공고 2.5-3~8] AI에게 배정안을 받는다. (결과 안내, 결과)를 돌려준다.
 
     AI를 기다리는 동안 DB 연결을 붙잡지 않도록, 지금 상태(board)는 부르는 쪽이 먼저 읽어 넘긴다.
-    3차까지 실패하면 앱이 스스로 배정하기(공고 2.5-6)는 작업 #14에서 더한다.
     """
     require_admin(user)
     # [공고 2.5-3] 마감 뒤 남은 학생을 배정한다
     if not board.closed:
         return "막힘: 모집이 마감되지 않음", None
+    # 모든 경우를 따져 검사 다섯 가지를 지키는 배정을 먼저 찾아 둔다(AI 없이, 1초 안쪽)
+    app_plan = solver.find_assignment(board)
     # [공고 2.5-8] 규칙을 모두 지키는 배정이 없으면 배정안을 만들지 않고 이유를 보인다. 이때는 AI를 부르지 않는다
-    if solver.find_assignment(board) is None:
+    if app_plan is None:
         return "막힘: 규칙을 지키는 배정이 없음: " + "; ".join(solver.why_impossible(board)), None
     if not board.unassigned:
         return "막힘: 팀이 없는 학생이 없음", None
@@ -356,7 +357,11 @@ def propose(user: User | None, board, *, on_wait=None, on_attempt=None) -> tuple
         on_attempt=on_attempt,
     )
     if result.plan is None:
-        return "막힘: 3차 모델까지 실패함", result
+        # [공고 2.5-6, 3장 「3차 모델까지 실패」 어려운 해결] 3차 모델까지 실패하면 앱이 스스로 배정한다.
+        # 무작위가 아니라 모든 경우를 따져 찾은, 검사 다섯 가지를 모두 통과하는 배정이다
+        assert not rules.check_assignment(board, app_plan)
+        result.plan, result.by_app = app_plan, True
+        return "승인: 3차 모델까지 실패해 앱이 모든 경우를 따져 배정함(검사 다섯 가지 통과)", result
     return f"승인: {result.model_no}차 모델의 배정안이 검사를 통과함", result
 
 

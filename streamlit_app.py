@@ -25,6 +25,9 @@ def prepare_admin() -> str:
 
 RESULT_WORDS = ("승인", "대기", "거절", "막힘")
 
+# [공고 3장 「다른 사람의 변경 보기」 어려운 해결, 2.7] 바뀐 부분만 5초 이하 간격으로 자동으로 다시 그린다
+LIVE_SECONDS = 3
+
 
 def set_result(message: str) -> None:
     """단추를 누른 결과 안내를 남긴다. 누른 사람의 세션에만 남으므로 그 사람 화면에만 보인다(공고 2.7).
@@ -80,10 +83,11 @@ def login_screen() -> None:
 
 def header(user: service.User) -> None:
     with st.container(key="whoami"):
-        left, right = st.columns([4, 1])
+        left, middle, right = st.columns([3, 1, 1])
         left.markdown(f"**{user.name}** ({user.student_no})  \n{roles_text(user)}")
+        # [공고 2.7] 새로 고침 단추는 학생 화면과 관리자 화면 양쪽에 둔다. 누르면 화면 전체를 다시 그린다
+        middle.button("새로 고침", key="refresh")
         right.button("로그아웃", key="logout", on_click=logout)
-    show_result()
 
 
 def apply_block_reason(board: Board, user: service.User) -> str | None:
@@ -163,7 +167,13 @@ def team_card(team: Team, me: service.User | None = None, block: str | None = No
                 pending_list(team, me)
 
 
+@st.fragment(run_every=LIVE_SECONDS)
 def student_screen(user: service.User) -> None:
+    """학생 화면. 다른 사람의 지원·투표가 보이도록 이 부분만 LIVE_SECONDS초마다 다시 그린다.
+
+    지원·투표 단추를 누르면 이 부분만 다시 그려지므로 결과 안내(result)도 이 안에 둔다.
+    """
+    show_result()
     with db.connection() as conn:
         board = load_board(conn)
 
@@ -209,7 +219,7 @@ def on_admin_start(user: service.User) -> None:
 
 def clear_assign() -> None:
     """상태가 바뀌었으므로 지난 AI 배정 안내와 배정안을 지운다."""
-    for name in ("assign_log", "assign_note", "proposal"):
+    for name in ("assign_log", "assign_note", "proposal", "proposal_by_app"):
         st.session_state.pop(name, None)
 
 
@@ -221,6 +231,20 @@ def admin_screen(user: service.User) -> None:
     st.number_input("팀 수", min_value=1, max_value=20, value=3, step=1, key="admin_team_count")
     st.button("명단으로 처음 상태 만들기", key="admin_start", type="primary", on_click=on_admin_start, args=(user,))
 
+    admin_live()
+
+    with db.connection() as conn:
+        board = load_board(conn)
+    st.subheader("모집 마감")
+    st.caption("누르면 지원·투표를 받지 않고, 대기 중인 지원은 거절되며, 1명뿐인 팀의 학생은 팀에서 빠집니다.")
+    st.button("모집 마감", key="admin_close", disabled=board.closed, on_click=on_admin_close, args=(user,))
+
+    assign_section(user, board)
+
+
+@st.fragment(run_every=LIVE_SECONDS)
+def admin_live() -> None:
+    """관리자 화면의 팀 현황과 팀이 없는 학생. 학생들의 지원·투표가 보이도록 LIVE_SECONDS초마다 다시 그린다."""
     with db.connection() as conn:
         students = conn.execute("select count(*) as n from tf_students where not is_admin").fetchone()["n"]
         board = load_board(conn)
@@ -230,10 +254,6 @@ def admin_screen(user: service.User) -> None:
     for team in board.teams:
         team_card(team)
 
-    st.subheader("모집 마감")
-    st.caption("누르면 지원·투표를 받지 않고, 대기 중인 지원은 거절되며, 1명뿐인 팀의 학생은 팀에서 빠집니다.")
-    st.button("모집 마감", key="admin_close", disabled=board.closed, on_click=on_admin_close, args=(user,))
-
     # [공고 2.7] 팀이 없는 학생 표시. 마감 결과(1명 팀에서 빠진 학생)도 여기서 확인한다
     st.markdown("**팀이 없는 학생**")
     with st.container(key="unassigned", border=True):
@@ -241,8 +261,6 @@ def admin_screen(user: service.User) -> None:
             st.markdown("\n".join(f"- {m.name} ({m.student_no}) — {m.roles_text()}" for m in board.unassigned))
         else:
             st.markdown("팀이 없는 학생이 없음")
-
-    assign_section(user, board)
 
 
 def assign_section(user: service.User, board: Board) -> None:
@@ -271,6 +289,7 @@ def assign_section(user: service.User, board: Board) -> None:
             st.session_state["assign_log"] = [a.text() for a in result.attempts] if result else []
             st.session_state["assign_note"] = message
             st.session_state["proposal"] = result.plan if result and result.plan else None
+            st.session_state["proposal_by_app"] = bool(result and result.by_app)
             set_result(message)
             st.rerun()
 
@@ -283,7 +302,8 @@ def assign_section(user: service.User, board: Board) -> None:
     proposal = st.session_state.get("proposal")
     if proposal:
         # [공고 2.5-7] 검사를 통과한 배정안만 보인다: 학생의 이름과 역할, 배정된 팀
-        st.markdown("**배정안** (검사 다섯 가지를 통과함)")
+        by = "3차 모델까지 실패해 앱이 모든 경우를 따져 만든 배정안" if st.session_state.get("proposal_by_app") else "AI 배정안"
+        st.markdown(f"**배정안** — {by}, 검사 다섯 가지를 통과함")
         people = {m.student_no: m for m in board.unassigned}
         rows = [
             {"팀": f"팀{team_no}", "이름": people[no].name if no in people else no, "학번": no,
@@ -349,6 +369,7 @@ def main() -> None:
     st.title("팀 편성")
     header(user)
     if user.is_admin:
+        show_result()  # 관리자 단추는 모두 화면 전체를 다시 그리므로 결과 안내는 위쪽에 둔다
         admin_screen(user)
     else:
         student_screen(user)

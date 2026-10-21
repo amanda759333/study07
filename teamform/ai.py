@@ -129,6 +129,7 @@ class AssignResult:
     plan: list[tuple[str, int]] | None  # (학번, 팀 번호). 검사를 통과한 배정안만. 모두 실패하면 None
     model_no: int | None  # 몇 차 모델의 배정안인지
     attempts: list[Attempt] = field(default_factory=list)
+    by_app: bool = False  # 3차 모델까지 실패해 앱이 스스로 만든 배정안이면 True(공고 2.5-6)
 
 
 RULES_TEXT = """- 팀 수는 정해져 있다(팀1, 팀2, …). 배정한 뒤 모든 팀이 2~4명이어야 한다(빈 팀 없음).

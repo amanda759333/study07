@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from teamform import ai, service
+from teamform import ai, rules, service
 from teamform.ai import AIError, ask_models, build_prompt, parse_plan
 from teamform.board import Board, Member, Team
 
@@ -166,8 +166,13 @@ def test_propose_all_fail(monkeypatch):
         raise AIError("HTTP 429", "사용량 제한")
 
     monkeypatch.setattr(ai, "call_model", fail)
-    message, result = service.propose(ADMIN, board_after_close())
-    assert message == "막힘: 3차 모델까지 실패함" and len(result.attempts) == 3
+    board = board_after_close()
+    message, result = service.propose(ADMIN, board)
+    # [공고 2.5-6, 3장 어려운 해결] 3차까지 실패하면 앱이 모든 경우를 따져 배정한다
+    assert message == "승인: 3차 모델까지 실패해 앱이 모든 경우를 따져 배정함(검사 다섯 가지 통과)"
+    assert len(result.attempts) == 3 and result.by_app and result.model_no is None
+    assert result.plan == [("2026104", 1)]
+    assert rules.check_assignment(board, result.plan) == []
 
 
 def test_impossible_board_does_not_call_ai(monkeypatch):

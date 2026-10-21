@@ -153,3 +153,39 @@ def test_admin_assign_shows_status(monkeypatch):
     finally:
         with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
             service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(EASY), 3)
+
+
+
+def test_refresh_button_on_both_screens(temp_student):
+    """[공고 2.7] 새로 고침 단추(refresh)를 학생 화면과 관리자 화면 양쪽에 둔다."""
+    student = run_login(temp_student, "1234")
+    assert student.button(key="refresh") is not None
+    student.button(key="refresh").click().run()
+    assert not student.exception and "user_id" in student.session_state
+    admin = run_login("admin", ADMIN_PASSWORD)
+    assert admin.button(key="refresh") is not None
+
+
+def test_all_models_fail_app_assigns(monkeypatch):
+    """[공고 2.5-6] 3차 모델까지 실패하면 앱이 배정안을 만들고, 확정까지 된다."""
+    from teamform import ai
+
+    def fail(model, prompt, timeout):
+        raise ai.AIError("HTTP 429", "사용량 제한")
+
+    monkeypatch.setattr(ai, "call_model", fail)
+    with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
+        service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(EASY), 3)
+    try:
+        at = run_login("admin", ADMIN_PASSWORD)
+        at.button(key="admin_close").click().run()
+        at.button(key="admin_assign").click().run()
+        assert result_text(at) == "승인: 3차 모델까지 실패해 앱이 모든 경우를 따져 배정함(검사 다섯 가지 통과)"
+        status = " ".join(m.value for m in at.markdown)
+        assert "3차 dots-studio/dots-3-note-preview:free: HTTP 429" in status
+        assert "앱이 모든 경우를 따져 만든 배정안" in status
+        at.button(key="admin_confirm").click().run()
+        assert result_text(at) == "승인: 배정안을 확정함(8명)"
+    finally:
+        with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
+            service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(EASY), 3)
