@@ -276,8 +276,19 @@ def vote(conn, voter: User, applicant_no: str, yes: bool) -> str:
         conn.execute("update tf_applications set status = '거절', reason = '팀원이 거부함' where id = %s", (application.id,))
         return f"거절: 팀원이 거부함({voter.name})"
     if outcome == "승인":
+        # [공고 2.4 「승인 직전」, 3장 「같은 팀에 대기 중인 지원이 여럿」 어려운 해결]
+        # 모든 팀원이 찬성해 승인하려는 때에 규칙(정원, 주 역할 중복, 필수 포함 역할 자리)을 지금의 팀원으로 다시 검사한다.
+        # 같은 팀의 앞 지원이 먼저 승인되어 팀이 바뀌었을 수 있기 때문이다. 어기면 이 지원은 거절된다.
+        # 팀 행을 잠그고 한 건씩 처리하므로 처리 순서는 지원한 순서가 아니라 투표가 끝난 순서다.
+        # 다른 대기 지원은 여기서 건드리지 않는다(그 전에 미리 거절하지 않음). 각자 투표가 끝날 때 재검사를 받는다
+        reason = rules.check_join(team, application.applicant)
+        if reason:
+            conn.execute(
+                "update tf_applications set status = '거절', reason = %s where id = %s",
+                (f"승인 직전 검사: {reason}", application.id),
+            )
+            return f"거절: 승인 직전 검사에서 {reason}"
         # [공고 2.4 「모든 팀원이 찬성」] 승인되어 그 팀의 팀원이 됨
-        # (승인 직전 규칙 재검사는 공고 3장의 어려운 해결로, 작업 #14에서 이 자리에 더한다)
         if not _add_member(conn, team.id, application.applicant.id):
             # 자리가 없으면 DB 제약(slot_no 1~4)이 다섯 번째 팀원을 막는다
             conn.execute("update tf_applications set status = '거절', reason = '팀이 꽉 참' where id = %s", (application.id,))
