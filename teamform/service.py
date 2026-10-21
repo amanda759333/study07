@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import bcrypt
 
-from teamform import rules
+from teamform import ai, rules
 from teamform.board import MAX_MEMBERS, Member, load_board
 from teamform.roster import ADMIN_NO, parse_roster
 
@@ -317,3 +317,29 @@ def close(conn, user: User | None) -> str:
            where (select count(*) from tf_members x where x.team_id = m.team_id) = 1"""
     ).rowcount
     return f"승인: 모집을 마감함(대기 지원 {rejected}건 거절, 1명뿐인 팀의 학생 {removed}명 빠짐)"
+
+
+# AI 배정 ---------------------------------------------------------------------
+
+
+def propose(user: User | None, board, *, on_wait=None, on_attempt=None) -> tuple[str, "ai.AssignResult | None"]:
+    """[공고 2.5-3~5] AI에게 배정안을 받는다. (결과 안내, 결과)를 돌려준다.
+
+    AI를 기다리는 동안 DB 연결을 붙잡지 않도록, 지금 상태(board)는 부르는 쪽이 먼저 읽어 넘긴다.
+    배정안 검사 다섯 가지(#12), 규칙을 지키는 배정이 없을 때(#13), 3차까지 실패하면 앱이 배정하기(#14)는 다음 작업에서 더한다.
+    """
+    require_admin(user)
+    # [공고 2.5-3] 마감 뒤 남은 학생을 배정한다
+    if not board.closed:
+        return "막힘: 모집이 마감되지 않음", None
+    if not board.unassigned:
+        return "막힘: 팀이 없는 학생이 없음", None
+    result = ai.ask_models(
+        ai.build_prompt(board),
+        lambda plan: rules.check_plan_format(board, plan),
+        on_wait=on_wait,
+        on_attempt=on_attempt,
+    )
+    if result.plan is None:
+        return "막힘: 3차 모델까지 실패함", result
+    return f"승인: {result.model_no}차 모델의 배정안이 검사를 통과함", result

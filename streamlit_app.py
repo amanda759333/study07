@@ -8,6 +8,7 @@
 import streamlit as st
 
 from teamform import db, service
+from teamform.ai import MODEL_TIMEOUT
 from teamform.board import MAX_MEMBERS, Board, Team, load_board
 from teamform.config import get_secret, secret_status
 from teamform.roster import RosterError
@@ -203,6 +204,13 @@ def on_admin_start(user: service.User) -> None:
         set_result(f"막힘: {db.safe_error(exc)}")
     else:
         set_result(message)
+        clear_assign()
+
+
+def clear_assign() -> None:
+    """상태가 바뀌었으므로 지난 AI 배정 안내와 배정안을 지운다."""
+    for name in ("assign_log", "assign_note", "proposal"):
+        st.session_state.pop(name, None)
 
 
 def admin_screen(user: service.User) -> None:
@@ -234,12 +242,50 @@ def admin_screen(user: service.User) -> None:
         else:
             st.markdown("팀이 없는 학생이 없음")
 
+    assign_section(user, board)
+
+
+def assign_section(user: service.User, board: Board) -> None:
+    """AI 배정 단추(admin_assign)와 진행 안내(assign_status).
+
+    AI를 기다리는 동안 화면을 붙잡고 있으므로 on_click이 아니라 이 자리에서 실행해 안내를 바로 고쳐 쓴다.
+    """
+    st.subheader("AI 배정")
+    st.caption(f"1차 → 2차 → 3차 모델 순서로 부르고, 모델마다 {MODEL_TIMEOUT:.0f}초가 넘으면 다음 모델로 넘어갑니다.")
+    clicked = st.button("AI 배정", key="admin_assign")
+    with st.container(key="assign_status", border=True):
+        if clicked:
+            done_box, wait_box = st.container(), st.empty()
+
+            def on_wait(no: int, model: str, elapsed: float) -> None:
+                # [공고 3장 「AI 대기 중 화면」] 몇 차 모델의 응답을 기다리는 중인지 보인다
+                wait_box.info(f"{no}차 모델({model})의 응답을 기다리는 중… {elapsed:.0f}초 / {MODEL_TIMEOUT:.0f}초")
+
+            def on_attempt(attempt) -> None:
+                done_box.markdown(f"- {attempt.text()}")
+
+            try:
+                message, result = service.propose(user, board, on_wait=on_wait, on_attempt=on_attempt)
+            except Exception as exc:
+                message, result = f"막힘: {db.safe_error(exc)}", None
+            st.session_state["assign_log"] = [a.text() for a in result.attempts] if result else []
+            st.session_state["assign_note"] = message
+            st.session_state["proposal"] = result.plan if result and result.plan else None
+            set_result(message)
+            st.rerun()
+
+        for line in st.session_state.get("assign_log", []):
+            st.markdown(f"- {line}")
+        note = st.session_state.get("assign_note")
+        st.markdown(note if note else "아직 AI 배정을 하지 않음")
+
 
 def on_admin_close(user: service.User) -> None:
     """모집 마감 단추(admin_close). 해냈으면 "승인", 못 했으면 "막힘"으로 시작한다(공고 2.7)."""
     try:
         with db.connection() as conn:
             set_result(service.close(conn, user))
+        clear_assign()
     except PermissionError:
         set_result("막힘: 관리자만 쓸 수 있음")
     except Exception as exc:

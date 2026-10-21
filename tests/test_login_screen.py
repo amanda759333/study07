@@ -115,3 +115,34 @@ def test_admin_close_and_unassigned():
     finally:
         with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
             service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(EASY), 3)
+
+
+def test_admin_assign_shows_status(monkeypatch):
+    """[공고 2.7] admin_assign의 result와 assign_status(몇 차 모델의 결과). AI는 가짜로 바꾼다."""
+    from teamform import ai
+
+    tries = []
+
+    def fake(model, prompt, timeout):
+        tries.append(model)
+        if len(tries) == 1:
+            raise ai.AIError("HTTP 429", "사용량 제한")
+        return '{"assignments": [{"student_no": "2026101", "team_no": 1}, {"student_no": "2026102", "team_no": 2}]}'
+
+    monkeypatch.setattr(ai, "call_model", fake)
+    with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
+        service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(EASY), 3)
+    try:
+        at = run_login("admin", ADMIN_PASSWORD)
+        at.button(key="admin_assign").click().run()
+        assert result_text(at) == "막힘: 모집이 마감되지 않음"
+
+        at.button(key="admin_close").click().run()
+        at.button(key="admin_assign").click().run()
+        assert result_text(at) == "승인: 2차 모델의 배정안이 검사를 통과함"
+        status = " ".join(m.value for m in at.markdown)
+        assert "1차 google/gemma-4-31b-it:free: HTTP 429" in status
+        assert "2차 minimax/minimax-m3.1-flash:free: 성공" in status
+    finally:
+        with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
+            service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(EASY), 3)
