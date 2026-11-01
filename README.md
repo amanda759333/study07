@@ -7,7 +7,7 @@
 
 ## 1. 배포 주소
 
-**(배포 후 채움)** — Streamlit Community Cloud, 브랜치 `master`, 앱 파일 `streamlit_app.py`
+https://hy-team-2026.streamlit.app — Streamlit Community Cloud, 저장소 `amanda759333/study07`, 브랜치 `master`, 앱 파일 `streamlit_app.py`
 
 ## 2. PRD와 구현 계획의 위치
 
