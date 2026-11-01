@@ -16,9 +16,26 @@ SECRET_NAMES = ("OPENROUTER_API_KEY", "DATABASE_URL", "ADMIN_PASSWORD")
 load_dotenv(Path(__file__).resolve().parent.parent / ".env", encoding="utf-8-sig")
 
 
+QUOTE_PAIRS = {'"': '"', "'": "'", "“": "”", "‘": "’"}
+
+
+def clean_secret(value) -> str | None:
+    """붙여 넣다 생기는 실수를 떼어 낸다: 앞뒤 빈칸·줄바꿈, 값 전체를 한 번 더 감싼 따옴표(둥근 따옴표 포함).
+
+    DATABASE_URL이 정확히 postgresql://로 시작하지 않으면 DB 연결 도구가 주소로 읽지 못하고
+    'missing "=" after …' 오류를 낸다(11/2 배포에서 겪음).
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    while len(text) >= 2 and QUOTE_PAIRS.get(text[0]) == text[-1]:
+        text = text[1:-1].strip()
+    return text or None
+
+
 def get_secret(name: str) -> str | None:
     """환경변수(.env 포함) → Streamlit Secrets 순으로 찾는다. 없으면 None."""
-    value = os.environ.get(name)
+    value = clean_secret(os.environ.get(name))
     if value:
         return value
     try:
@@ -27,7 +44,7 @@ def get_secret(name: str) -> str | None:
         value = st.secrets.get(name)
     except Exception:  # secrets.toml이 없으면 예외가 난다
         value = None
-    return str(value) if value else None
+    return clean_secret(value)
 
 
 def secret_status() -> dict[str, str]:
