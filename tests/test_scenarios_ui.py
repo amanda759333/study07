@@ -18,13 +18,21 @@ from streamlit.testing.v1 import AppTest
 from teamform import ai, service
 from teamform.board import load_board
 from teamform.config import get_secret
+from teamform.roster import parse_roster
 from teamform.rules import check_assignment
-from tests.scenarios import EASY, HARD, MEDIUM, csv_bytes, numbers
+from tests.scenarios import EASY, HARD, MEDIUM, csv_bytes
 
 DATABASE_URL = get_secret("DATABASE_URL")
 ADMIN_PASSWORD = get_secret("ADMIN_PASSWORD")
 pytestmark = pytest.mark.skipif(not (DATABASE_URL and ADMIN_PASSWORD), reason="비밀 값 없음")
 APP = str(Path(__file__).resolve().parent.parent / "streamlit_app.py")
+DATA = Path(__file__).resolve().parent.parent / "data"  # e-class에서 받은 연습 시나리오 명단(가상 학생)
+
+
+def roster(file_name, rows):
+    """e-class에서 받은 실제 명단 파일이 있으면 그대로, 없으면 부록 표로 만든 명단."""
+    path = DATA / file_name
+    return path.read_bytes() if path.exists() else csv_bytes(rows)
 
 # 부록의 단계. ("지원", 이름, 팀, 기대) / ("찬성"·"거부", 투표자, 지원자, 기대) / ("마감", 기대) / ("배정확정",)
 EASY_STEPS = [
@@ -70,8 +78,9 @@ HARD_STEPS = [
 class Grader:
     """채점 프로그램 흉내: 사람마다 화면 하나, 동작 전에 다시 그림, 단추가 없거나 꺼져 있으면 막힘."""
 
-    def __init__(self, rows):
-        self.no = numbers(rows)
+    def __init__(self, data):
+        # 실제 명단의 이름은 "학생1(PL;PT;TT)"처럼 역할 약자가 붙어 있으므로 "학생1"로 찾는다
+        self.no = {r.name.split("(")[0]: r.student_no for r in parse_roster(data)}
         self.screens = {}
 
     def screen(self, who, student_no, password):
@@ -103,14 +112,14 @@ class Grader:
         return self.press("admin", key, "admin", ADMIN_PASSWORD)
 
 
-def play(rows, team_count, steps, monkeypatch):
+def play(data, team_count, steps, monkeypatch):
     def all_fail(model, prompt, timeout):
         raise ai.AIError("HTTP 429", "사용량 제한")
 
     monkeypatch.setattr(ai, "call_model", all_fail)
     with psycopg.connect(DATABASE_URL, row_factory=dict_row) as c:
-        service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), csv_bytes(rows), team_count)
-    g = Grader(rows)
+        service.reset_roster(c, service.login(c, "admin", ADMIN_PASSWORD), data, team_count)
+    g = Grader(data)
     log = []
     try:
         for step in steps:
@@ -142,11 +151,11 @@ def play(rows, team_count, steps, monkeypatch):
 
 
 def test_easy(monkeypatch):
-    play(EASY, 3, EASY_STEPS, monkeypatch)
+    play(roster("쉬움.csv", EASY), 3, EASY_STEPS, monkeypatch)
 
 
 def test_medium(monkeypatch):
-    log = play(MEDIUM, 4, MEDIUM_STEPS, monkeypatch)
+    log = play(roster("중간.csv", MEDIUM), 4, MEDIUM_STEPS, monkeypatch)
     blocked = [got for step, want, got in log if want == "막힘"]
     assert blocked[0] == "막힘: 같은 주 역할의 팀원이 있음"   # 3단계는 단추를 누른 뒤 이유와 함께
     assert blocked[1].startswith("막힘(단추 없음·비활성)")   # 8단계 팀3은 대기 지원이 있어 단추가 꺼짐
@@ -154,4 +163,4 @@ def test_medium(monkeypatch):
 
 
 def test_hard(monkeypatch):
-    play(HARD, 4, HARD_STEPS, monkeypatch)
+    play(roster("어려움.csv", HARD), 4, HARD_STEPS, monkeypatch)
