@@ -143,8 +143,8 @@ def test_admin_assign_shows_status(monkeypatch):
         at.button(key="admin_assign").click().run()
         assert result_text(at) == "승인: 2차 모델의 배정안이 검사를 통과함"
         status = " ".join(m.value for m in at.markdown)
-        assert "1차 google/gemma-4-31b-it:free: HTTP 429" in status
-        assert "2차 minimax/minimax-m3.1-flash:free: 성공" in status
+        assert f"1차 `{ai.MODELS[0]}`: HTTP 429" in status  # 모델 이름은 코드 서식(이모지로 깨지지 않게)
+        assert f"2차 `{ai.MODELS[1]}`: 성공" in status
         assert len(at.dataframe[0].value) == 8  # 배정안 표: 8명
         at.button(key="admin_confirm").click().run()
         assert result_text(at) == "승인: 배정안을 확정함(8명)"
@@ -181,7 +181,7 @@ def test_all_models_fail_app_assigns(monkeypatch):
         at.button(key="admin_assign").click().run()
         assert result_text(at) == "승인: 3차 모델까지 실패해 앱이 모든 경우를 따져 배정함(검사 다섯 가지 통과)"
         status = " ".join(m.value for m in at.markdown)
-        assert "3차 dots-studio/dots-3-note-preview:free: HTTP 429" in status
+        assert f"3차 `{ai.MODELS[2]}`: HTTP 429" in status
         assert "앱이 모든 경우를 따져 만든 배정안" in status
         at.button(key="admin_confirm").click().run()
         assert result_text(at) == "승인: 배정안을 확정함(8명)"

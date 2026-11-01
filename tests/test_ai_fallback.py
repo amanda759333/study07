@@ -186,3 +186,10 @@ def test_impossible_board_does_not_call_ai(monkeypatch):
     message, result = service.propose(ADMIN, board)
     assert message.startswith("막힘: 규칙을 지키는 배정이 없음: ") and result is None
     assert "웹 프로그래머가 없는 팀은 2개인데 웹 프로그래머를 맡을 수 있는 팀이 없는 학생은 1명임" in message
+
+
+def test_attempt_markdown_keeps_free_suffix():
+    """화면용 줄은 모델 이름을 코드 서식으로 감싸 ":free:"가 이모지로 바뀌지 않게 한다(10/31 캡처에서 발견)."""
+    attempt = ai.Attempt(1, "google/gemma-4-31b-it:free", "HTTP 429", 0.7, "사용량 제한")
+    assert attempt.markdown() == "1차 `google/gemma-4-31b-it:free`: HTTP 429 (0.7초) — 사용량 제한"
+    assert attempt.text() == "1차 google/gemma-4-31b-it:free: HTTP 429 (0.7초) — 사용량 제한"  # 로그는 그대로

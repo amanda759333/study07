@@ -277,16 +277,16 @@ def assign_section(user: service.User, board: Board) -> None:
 
             def on_wait(no: int, model: str, elapsed: float) -> None:
                 # [공고 3장 「AI 대기 중 화면」] 몇 차 모델의 응답을 기다리는 중인지 보인다
-                wait_box.info(f"{no}차 모델({model})의 응답을 기다리는 중… {elapsed:.0f}초 / {MODEL_TIMEOUT:.0f}초")
+                wait_box.info(f"{no}차 모델(`{model}`)의 응답을 기다리는 중… {elapsed:.0f}초 / {MODEL_TIMEOUT:.0f}초")
 
             def on_attempt(attempt) -> None:
-                done_box.markdown(f"- {attempt.text()}")
+                done_box.markdown(f"- {attempt.markdown()}")
 
             try:
                 message, result = service.propose(user, board, on_wait=on_wait, on_attempt=on_attempt)
             except Exception as exc:
                 message, result = f"막힘: {db.safe_error(exc)}", None
-            st.session_state["assign_log"] = [a.text() for a in result.attempts] if result else []
+            st.session_state["assign_log"] = [a.markdown() for a in result.attempts] if result else []
             st.session_state["assign_note"] = message
             st.session_state["proposal"] = result.plan if result and result.plan else None
             st.session_state["proposal_by_app"] = bool(result and result.by_app)

@@ -35,7 +35,7 @@ def test_request_has_low_reasoning_and_large_max_tokens():
     ai.call_model(ai.MODELS[0], "배정해 줘", client=fake(handler))
     assert seen["reasoning"] == {"effort": "low"}
     assert seen["max_tokens"] == ai.MAX_TOKENS >= 8000
-    assert seen["model"] == "google/gemma-4-31b-it:free"
+    assert seen["model"] == ai.MODELS[0]
 
 
 def test_models_are_named_not_router():

@@ -24,15 +24,16 @@ log = logging.getLogger(__name__)
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # [공고 4.3] 무료 텍스트 생성 모델 3개를 이름으로 직접 지정한다. 라우터 openrouter/free는 쓰지 않는다
+# 2026-10-31 실제 배정 문제(부록 중간 시나리오, 8명)로 시험해 고친 순서. minimax는 오픈라우터 목록에서 사라짐(404)
 MODELS = (
-    "google/gemma-4-31b-it:free",
-    "minimax/minimax-m3.1-flash:free",
-    "dots-studio/dots-3-note-preview:free",
+    "nvidia/nemotron-3.5-super-vl:free",     # 검사 다섯 가지 통과, 31.5초
+    "dots-studio/dots-3-note-preview:free",  # 검사 다섯 가지 통과, 109초
+    "google/gemma-4-31b-it:free",            # 10/20 성공, 10/21·10/31 HTTP 429
 )
 
 REASONING = {"effort": "low"}  # 생각을 짧게 해서 답을 쓸 몫을 남긴다
 # 넉넉한 응답 길이 한도. 배정안 JSON은 길어야 1~2천 토큰이고, 남는 몫은 생각에 쓰인다.
-# 세 모델 가운데 가장 작은 출력 한도(gemma-4-31b의 32768)보다 작게 둔다(2026-10-21 오픈라우터 모델 목록)
+# 세 모델 가운데 가장 작은 출력 한도(gemma-4-31b의 32768)보다 작게 둔다(2026-10-31 오픈라우터 모델 목록)
 MAX_TOKENS = 16000
 
 
@@ -122,6 +123,12 @@ class Attempt:
     def text(self) -> str:
         detail = f" — {self.detail}" if self.detail else ""
         return f"{self.no}차 {self.model}: {self.outcome} ({self.seconds:.1f}초){detail}"
+
+    def markdown(self) -> str:
+        """화면(st.markdown)용. 모델 이름을 코드 서식으로 감싼다.
+        감싸지 않으면 "…-it:free: HTTP 429"의 ":free:"를 markdown이 이모지(🆓)로 바꿔 모델 이름이 깨진다."""
+        detail = f" — {self.detail}" if self.detail else ""
+        return f"{self.no}차 `{self.model}`: {self.outcome} ({self.seconds:.1f}초){detail}"
 
 
 @dataclass
