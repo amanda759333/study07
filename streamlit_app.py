@@ -5,12 +5,14 @@
 화면 요소의 key는 공고 2.7절 표(CLAUDE.md의 key 표)와 한 글자도 다르면 안 된다.
 구현 순서는 docs/구현 계획.md 4절을 따른다.
 """
+import logging
+
 import streamlit as st
 
 from teamform import db, service
 from teamform.ai import MODEL_TIMEOUT
 from teamform.board import MAX_MEMBERS, Board, Team, load_board
-from teamform.config import get_secret, secret_status
+from teamform.config import describe_db_url, get_secret, secret_status
 from teamform.roster import RosterError
 
 st.set_page_config(page_title="팀 편성", page_icon="👥")
@@ -351,6 +353,9 @@ def main() -> None:
     try:
         prepare_admin()
     except Exception as exc:
+        # 로그(Manage app)에만 DATABASE_URL의 모양을 남긴다. 값·주소·비밀번호는 남기지 않는다(공고 4.1)
+        logging.getLogger(__name__).warning("[DB 진단] %s / DATABASE_URL 모양: %s",
+                                            type(exc).__name__, describe_db_url(get_secret("DATABASE_URL")))
         st.error(f"관리자 계정을 준비하지 못함: {db.safe_error(exc)}")
         st.stop()
 

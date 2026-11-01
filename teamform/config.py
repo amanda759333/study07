@@ -17,6 +17,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env", encoding="utf-8-sig
 
 
 QUOTE_PAIRS = {'"': '"', "'": "'", "“": "”", "‘": "’"}
+QUOTE_CHARS = "\"'“”‘’"
 
 
 def clean_secret(value) -> str | None:
@@ -45,6 +46,20 @@ def get_secret(name: str) -> str | None:
     except Exception:  # secrets.toml이 없으면 예외가 난다
         value = None
     return clean_secret(value)
+
+
+def describe_db_url(url: str | None) -> str:
+    """DATABASE_URL의 모양만 설명한다(값·주소·비밀번호는 담지 않음). 배포한 앱의 연결 실패를 로그로 진단할 때 쓴다."""
+    if not url:
+        return "없음"
+    yn = lambda ok: "예" if ok else "아니오"
+    return (
+        f"postgresql://로 시작={yn(url.startswith(('postgresql://', 'postgres://')))}, "
+        f"빈칸·줄바꿈 있음={yn(any(ch.isspace() for ch in url))}, "
+        f"따옴표 있음={yn(any(ch in url for ch in QUOTE_CHARS))}, "
+        f"/postgres로 끝남={yn(url.endswith('/postgres'))}, "
+        f"글자 수={len(url)}, @ 개수={url.count('@')}, : 개수={url.count(':')}"
+    )
 
 
 def secret_status() -> dict[str, str]:
